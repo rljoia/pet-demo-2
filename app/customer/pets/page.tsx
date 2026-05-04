@@ -2,9 +2,9 @@
 
 import { useEffect, useState, FormEvent } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getPetsByOwner, createPet, deletePet } from '@/lib/db';
+import { getPetsByOwner, createPet, deletePet, updatePet } from '@/lib/db';
 import { Pet, PetSpecies } from '@/lib/types';
-import { PawPrint, Plus, Trash2, X, AlertCircle, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { PawPrint, Plus, Pencil, Trash2, X, AlertCircle, CheckCircle, XCircle, Clock } from 'lucide-react';
 
 const speciesEmoji: Record<string, string> = {
   dog: '🐶', cat: '🐱', bird: '🐦', rabbit: '🐰', other: '🐾',
@@ -40,6 +40,7 @@ export default function CustomerPetsPage() {
   const { user } = useAuth();
   const [pets, setPets] = useState<Pet[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [editingPet, setEditingPet] = useState<Pet | null>(null);
   const [form, setForm] = useState(defaultForm);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -75,6 +76,37 @@ export default function CustomerPetsPage() {
       setForm(defaultForm);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to add pet');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleEditStart(pet: Pet) {
+    setEditingPet(pet);
+    setForm({ ...defaultForm, breed: pet.breed, age: String(pet.age), notes: pet.notes ?? '' });
+    setError('');
+  }
+
+  async function handleEditSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingPet) return;
+    setError('');
+    const ageNum = parseInt(form.age);
+    if (isNaN(ageNum) || ageNum < 0 || ageNum > 30) {
+      setError('Please enter a valid age (0–30).');
+      return;
+    }
+    setLoading(true);
+    try {
+      updatePet(editingPet.id, {
+        breed: form.breed.trim(),
+        age: ageNum,
+        notes: form.notes.trim() || undefined,
+      });
+      loadPets();
+      setEditingPet(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update pet');
     } finally {
       setLoading(false);
     }
@@ -117,13 +149,22 @@ export default function CustomerPetsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="font-bold text-gray-800 text-lg">{pet.name}</h3>
-                    <button
-                      onClick={() => handleDelete(pet.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600"
-                      title="Remove pet"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => handleEditStart(pet)}
+                        className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-400 hover:text-blue-600"
+                        title="Edit pet"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(pet.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600"
+                        title="Remove pet"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                   <p className="text-sm text-gray-500 capitalize">{pet.species} · {pet.breed} · {pet.age} year{pet.age !== 1 ? 's' : ''} old</p>
                   {pet.notes && <p className="text-xs text-gray-400 mt-1 italic">{pet.notes}</p>}
@@ -140,6 +181,47 @@ export default function CustomerPetsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Edit Pet Modal */}
+      {editingPet && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold text-gray-800">Edit {editingPet.name}</h2>
+              <button onClick={() => setEditingPet(null)} className="p-2 rounded-lg hover:bg-gray-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="p-6 flex flex-col gap-4">
+              {error && (
+                <div className="flex items-center gap-2 bg-red-50 text-red-700 rounded-lg px-3 py-2 text-sm">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Breed *</label>
+                  <input required value={form.breed} onChange={(e) => setForm({ ...form, breed: e.target.value })} placeholder="Golden Retriever" className="input-field" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Age (years) *</label>
+                  <input required type="number" min={0} max={30} value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} placeholder="3" className="input-field" />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Notes (optional)</label>
+                <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any special needs or info for the daycare team…" rows={2} className="input-field resize-none" />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setEditingPet(null)} className="btn-secondary flex-1">Cancel</button>
+                <button type="submit" disabled={loading} className="btn-primary flex-1 disabled:opacity-60">
+                  {loading ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
